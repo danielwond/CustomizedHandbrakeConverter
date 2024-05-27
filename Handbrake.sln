@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34723.18
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Handbrake", "Handbrake.csproj", "{A7F4682B-8B64-48ED-9B7E-3B30892A1032}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A7F4682B-8B64-48ED-9B7E-3B30892A1032}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7F4682B-8B64-48ED-9B7E-3B30892A1032}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7F4682B-8B64-48ED-9B7E-3B30892A1032}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7F4682B-8B64-48ED-9B7E-3B30892A1032}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6F611E79-F65D-485C-A096-0A9A9765BF16}
+	EndGlobalSection
+EndGlobal
