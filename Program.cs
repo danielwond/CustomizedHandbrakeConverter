@@ -21,7 +21,7 @@ class Program
         var extensions = sourceArray.ToHashSet();
 
         var rootPath = "";
-        
+
         var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
                              .Where(x => extensions.Contains(Path.GetExtension(x)))
                              .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
@@ -43,11 +43,7 @@ class Program
             return;
         }
 
-
-        double percentage = (double)convertedFilesNotRenamed.Count / files.Count;
-
-        Console.WriteLine(string.Format("Converted files: {0} , Non Converted Files: {1}", convertedFilesNotRenamed.Count, files.Count));
-        Console.WriteLine(string.Format("{0}% Progress", Math.Floor(percentage * 100)));
+        ShowProgress(rootPath, extensions);
 
         if (convertedFilesNotRenamed.Count != 0)
         {
@@ -57,13 +53,10 @@ class Program
 
             Console.WriteLine("\nChecking if there are Corrupt Files");
 
-            using var spinner = new Spinner(10, 10);
-            spinner.Start();
-
             var corruptVideos = GetCorruptedVideos(convertedFilesNotRenamed);
             if (corruptVideos.Count != 0)
             {
-                Console.WriteLine("Found Corrupt Files: ");
+                Console.WriteLine("\nFound Corrupt Files: ");
                 foreach (var vid in corruptVideos)
                 {
                     Console.WriteLine(Path.GetFileName(vid));
@@ -71,21 +64,36 @@ class Program
                 Console.WriteLine("\nDelete corrupt files? (Y)es or (N)o");
                 if (Console.ReadLine().ToLower() == "y")
                 {
+                    using var spinner = new Spinner(10, 10);
+                    spinner.Start();
+
                     foreach (var item in corruptVideos)
                     {
                         File.SetAttributes(item, FileAttributes.Normal);
                         File.Delete(item);
                     }
-                    Console.WriteLine("All corrupt videos are deleted :)");
+                    spinner.Stop();
 
+                    Console.Write(new string(' ', Console.BufferWidth));
+                    Console.WriteLine("\nAll corrupt videos are now deleted :)");
+
+                    //Refresh Files after deletion
+
+                    files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                     .Where(x => extensions.Contains(Path.GetExtension(x)))
+                     .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
+                     .ToList();
+
+                    convertedFilesNotRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                                .Where(x => extensions.Contains(Path.GetExtension(x)))
+                                .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
+                                .ToList();
                 }
                 Console.Write("\b");
             }
             else
             {
                 Console.Write(new String(' ', Console.BufferWidth));
-
-
                 Console.WriteLine("\nNo Corrupt files Found.");
             }
             Console.WriteLine("------------------------------------------------------------------------------------------------------");
@@ -128,7 +136,7 @@ class Program
                 return;
             }
 
-            await ConvertFiles(filteredFiles);
+            await ConvertFiles(filteredFiles, rootPath, extensions);
 
             File.WriteAllText(Path.Combine(rootPath, "Converted.txt"), "1");
 
@@ -136,7 +144,7 @@ class Program
         }
     }
 
-    private async static Task ConvertFiles(IEnumerable<string> files)
+    private async static Task ConvertFiles(IEnumerable<string> files, string rootPath, HashSet<string> extensions)
     {
         foreach (var inputFile in files)
         {
@@ -157,6 +165,11 @@ class Program
 
                     var handbrake = Process.Start(handbrakePath, arguments);
                     handbrake.WaitForExit();
+
+                    Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
+                    Console.WriteLine($"Conversion of {fileName} finished!\n");
+                    ShowProgress(rootPath, extensions);
+                    Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
 
                     await Task.Delay(30000);
                 }
@@ -225,6 +238,25 @@ class Program
         }
 
         return corruptVideos;
+    }
+
+    private static void ShowProgress(string rootPath, HashSet<string> extensions)
+    {
+
+        var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                     .Where(x => extensions.Contains(Path.GetExtension(x)))
+                     .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
+                     .ToList();
+
+        var convertedFilesNotRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                                        .Where(x => extensions.Contains(Path.GetExtension(x)))
+                                        .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
+                                        .ToList();
+
+        double percentage = (double)convertedFilesNotRenamed.Count / files.Count;
+
+        Console.WriteLine(string.Format("Converted files: {0} , Non Converted Files: {1}", convertedFilesNotRenamed.Count, files.Count));
+        Console.WriteLine(string.Format("{0}% Progress", Math.Floor(percentage * 100)));
     }
 
     private static bool CheckHandbrakePath(string path)
