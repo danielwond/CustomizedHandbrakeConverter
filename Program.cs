@@ -7,7 +7,7 @@ using System.Timers;
 class Program
 {
     static string  handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
-    internal static readonly string[] sourceArray = [".mp4", ".wmv", ".avi", ".mkv", ".mov"];
+    internal static readonly HashSet<string> extensions = [".mp4", ".wmv", ".avi", ".mkv", ".mov"];
 
     static async Task Main(string[] args)
     {
@@ -18,42 +18,31 @@ class Program
             return;
         }
 
-        var extensions = sourceArray.ToHashSet();
 
-        var rootPath = "";
+        var rootPath = "M:\\NOPE\\BYDAY\\New folder (7)";
 
-        var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                             .Where(x => extensions.Contains(Path.GetExtension(x)))
-                             .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
-                             .ToList();
-
-/*        var convertedFilesRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                                     .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
-                                     
-                                     .ToList();*/
-        var convertedFilesNotRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                                        .Where(x => extensions.Contains(Path.GetExtension(x)))
-                                        .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
-                                        .ToList();
+        var videos = GetTotalVideos(rootPath);
+        var convertedVideos = GetConvertedVideos(rootPath);
 
         //Check if all conversion is finished in this folder!
-        if (File.Exists(Path.Combine(rootPath, "Finished.txt")))
+        if (CheckEncodeStatusOnFolder(rootPath)) 
         {
-            Console.WriteLine("Finished all in this folder!");
+            Console.WriteLine("Finished encoding all in this folder!");
             return;
         }
 
-        ShowProgress(rootPath, extensions);
+        Console.WriteLine(string.Format("Total Videos Found: {0}", videos));
+        ShowProgress(rootPath);
 
-        if (convertedFilesNotRenamed.Count != 0)
+        if (convertedVideos.Count != 0)
         {
-            Console.WriteLine(string.Format("Last Converted File name: {0}", Path.GetFileName(convertedFilesNotRenamed.Last())));
+            Console.WriteLine(string.Format("Last Converted File name: {0}", Path.GetFileName(convertedVideos.Last())));
 
             Console.WriteLine("------------------------------------------------------------------------------------------------------");
 
             Console.WriteLine("\nChecking if there are Corrupt Files");
 
-            var corruptVideos = GetCorruptedVideos(convertedFilesNotRenamed);
+            var corruptVideos = GetCorruptedVideos(convertedVideos);
             if (corruptVideos.Count != 0)
             {
                 Console.WriteLine("\nFound Corrupt Files: ");
@@ -79,15 +68,8 @@ class Program
 
                     //Refresh Files after deletion
 
-                    files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                     .Where(x => extensions.Contains(Path.GetExtension(x)))
-                     .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
-                     .ToList();
-
-                    convertedFilesNotRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                                .Where(x => extensions.Contains(Path.GetExtension(x)))
-                                .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
-                                .ToList();
+                    videos = GetTotalVideos(rootPath);
+                    convertedVideos = GetConvertedVideos(rootPath);
                 }
                 Console.Write("\b");
             }
@@ -100,7 +82,7 @@ class Program
         }
 
         //var filteredFiles = files.Where(x => !convertedFilesRenamed.Contains(x)).ToList();
-        var filteredFiles = files.Where(x => !convertedFilesNotRenamed.Select(x => x.Replace("Converted_", "")).Contains(x)).ToList();
+        var filteredFiles = videos.Where(x => !convertedVideos.Select(x => x.Replace("Converted_", "")).Contains(x)).ToList();
 
         if (filteredFiles.Count == 0 && File.Exists(Path.Combine(rootPath, "Converted.txt")))
         {
@@ -110,8 +92,8 @@ class Program
             {
                 return;
             }
-            //DeleteFiles(convertedFilesRenamed, rootPath);
-            DeleteFiles(convertedFilesNotRenamed.Select(x => x.Replace("Converted_", "")).ToList(), rootPath);
+
+            DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList(), rootPath);
 
             Console.Clear();
 
@@ -129,9 +111,23 @@ class Program
                 File.AppendAllText(Path.Combine(rootPath, "info.txt"), string.Format("Before Folder Size = {1} GB, {0} MB", BeforefolderSizeInMB, BeforefolderSizeInGB));
             }
 
-            Console.WriteLine("Found {0} files to convert, proceed? (Y)es or (N)o", filteredFiles.Count);
+            Console.WriteLine("Found {0} file(s) to convert, proceed? (Y)es, (N)o, (F)inalize", filteredFiles.Count);
 
-            if (Console.ReadLine() != "Y")
+            var pressed = Console.ReadLine();
+
+            if(pressed == "F")
+            {
+                directory = new DirectoryInfo(rootPath);
+
+                DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList(), rootPath);
+                LogFinished(directory, rootPath);
+                Console.Clear();
+
+                Console.WriteLine("Finalized! :)");
+
+                return;
+            }
+            else if (pressed != "Y")
             {
                 return;
             }
@@ -168,7 +164,7 @@ class Program
 
                     Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
                     Console.WriteLine($"Conversion of {fileName} finished!\n");
-                    ShowProgress(rootPath, extensions);
+                    ShowProgress(rootPath);
                     Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
 
                     await Task.Delay(30000);
@@ -240,22 +236,15 @@ class Program
         return corruptVideos;
     }
 
-    private static void ShowProgress(string rootPath, HashSet<string> extensions)
+    private static void ShowProgress(string rootPath)
     {
 
-        var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                     .Where(x => extensions.Contains(Path.GetExtension(x)))
-                     .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
-                     .ToList();
+        var totalVideos = GetTotalVideos(rootPath);
+        var convertedVideos = GetConvertedVideos(rootPath);
 
-        var convertedFilesNotRenamed = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                                        .Where(x => extensions.Contains(Path.GetExtension(x)))
-                                        .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
-                                        .ToList();
+        double percentage = (double)convertedVideos.Count / totalVideos.Count;
 
-        double percentage = (double)convertedFilesNotRenamed.Count / files.Count;
-
-        Console.WriteLine(string.Format("Converted files: {0} , Non Converted Files: {1}", convertedFilesNotRenamed.Count, files.Count));
+        Console.WriteLine(string.Format("Converted: {0}\nNon Converted: {1}", convertedVideos.Count, totalVideos.Count - convertedVideos.Count));
         Console.WriteLine(string.Format("{0}% Progress", Math.Floor(percentage * 100)));
     }
 
@@ -267,19 +256,22 @@ class Program
         }
         return false;
     }
-}
-
-namespace Handbrake
-{
-    public class VideoInfo
+    private static bool CheckEncodeStatusOnFolder(string rootPath)
     {
-        public int Bitrate { get; private set; }
-
-
-        public VideoInfo(MediaInfo.MediaInfo mi)
-        {
-            Bitrate = int.Parse(mi.Get(StreamKind.Video, 0, "BitRate"));
-
-        }
+        return File.Exists(Path.Combine(rootPath, "Finished.txt"));
+    }
+    private static List<string> GetTotalVideos(string rootPath)
+    {
+        return  Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                             .Where(x => extensions.Contains(Path.GetExtension(x)))
+                             .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
+                             .ToList();
+    }
+    private static List<string> GetConvertedVideos(string rootPath)
+    {
+        return Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+                                        .Where(x => extensions.Contains(Path.GetExtension(x)))
+                                        .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
+                                        .ToList();
     }
 }
