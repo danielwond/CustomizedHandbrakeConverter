@@ -1,4 +1,5 @@
 ﻿using Handbrake;
+using Handbrake.Data;
 using Handbrake.Properties;
 using MediaInfo;
 using System.Diagnostics;
@@ -7,31 +8,34 @@ using System.Timers;
 class Program
 {
     static string  handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
-    internal static readonly HashSet<string> extensions = [".mp4", ".wmv", ".avi", ".mkv", ".mov"];
+    internal static readonly HashSet<string> extensions = [".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v"];
 
     static async Task Main(string[] args)
     {
 
-        if(!CheckHandbrakePath(handbrakePath))
+        if(!CheckFilePath(handbrakePath))
         {
             Console.WriteLine("HandbrakeCLI does not exist.. please download the latest version from https://handbrake.fr/downloads2.php");
             return;
         }
 
 
-        var rootPath = "M:\\NOPE\\BYDAY\\New folder (7)";
+        //var rootPath = "M:\\NOPE\\OLD\\BYDAY\\1";
+        var rootPath = "M:\\NOPE\\New folder";
 
         var videos = GetTotalVideos(rootPath);
         var convertedVideos = GetConvertedVideos(rootPath);
 
+        var db = new MyDatabase(rootPath);
+
         //Check if all conversion is finished in this folder!
-        if (CheckEncodeStatusOnFolder(rootPath)) 
+        if (db.HasFinalizedConversion()) 
         {
-            Console.WriteLine("Finished encoding all in this folder!");
+            Console.WriteLine("Finished all encoding in this folder!");
             return;
         }
 
-        Console.WriteLine(string.Format("Total Videos Found: {0}", videos));
+        Console.WriteLine(string.Format("Total Videos Found: {0}\n\n", videos.Count));
         ShowProgress(rootPath);
 
         if (convertedVideos.Count != 0)
@@ -84,7 +88,7 @@ class Program
         //var filteredFiles = files.Where(x => !convertedFilesRenamed.Contains(x)).ToList();
         var filteredFiles = videos.Where(x => !convertedVideos.Select(x => x.Replace("Converted_", "")).Contains(x)).ToList();
 
-        if (filteredFiles.Count == 0 && File.Exists(Path.Combine(rootPath, "Converted.txt")))
+        if (filteredFiles.Count == 0 && db.HasFolderCompletedConversion())
         {
             Console.WriteLine("All files are converted.. delete all the old videos? (Y)es or (N)o");
 
@@ -93,22 +97,24 @@ class Program
                 return;
             }
 
-            DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList(), rootPath);
+            DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
 
             Console.Clear();
 
             Console.WriteLine("Old files are deleted! :)");
+
+            db.FinalizeFolderConversion();
         }
         else
         {
             var directory = new DirectoryInfo(rootPath);
             var BeforefolderSize = directory.EnumerateFiles("*", SearchOption.AllDirectories).Sum(fi => fi.Length);
-            var BeforefolderSizeInMB = BeforefolderSize / 1048576;
-            var BeforefolderSizeInGB = BeforefolderSizeInMB / 1024;
+            long BeforefolderSizeInMB = BeforefolderSize / 1048576;
+            long BeforefolderSizeInGB = BeforefolderSizeInMB / 1024;
 
-            if (!File.Exists(Path.Combine(rootPath, "info.txt")))
+            if (db.IsBeforeFolderSizeSet())
             {
-                File.AppendAllText(Path.Combine(rootPath, "info.txt"), string.Format("Before Folder Size = {1} GB, {0} MB", BeforefolderSizeInMB, BeforefolderSizeInGB));
+                db.SetBeforeFolderSize(BeforefolderSizeInGB == 0 ? BeforefolderSizeInMB : BeforefolderSizeInGB, BeforefolderSizeInGB == 0 ? "MB" : "GB");
             }
 
             Console.WriteLine("Found {0} file(s) to convert, proceed? (Y)es, (N)o, (F)inalize", filteredFiles.Count);
@@ -119,8 +125,8 @@ class Program
             {
                 directory = new DirectoryInfo(rootPath);
 
-                DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList(), rootPath);
-                LogFinished(directory, rootPath);
+                DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
+                LogFinished(directory, db);
                 Console.Clear();
 
                 Console.WriteLine("Finalized! :)");
@@ -132,15 +138,15 @@ class Program
                 return;
             }
 
-            await ConvertFiles(filteredFiles, rootPath, extensions);
+            await ConvertFiles(filteredFiles, rootPath, db);
 
-            File.WriteAllText(Path.Combine(rootPath, "Converted.txt"), "1");
+            db.FolderCompletedConversion();
 
-            LogFinished(directory, rootPath);
+            LogFinished(directory, db);
         }
     }
 
-    private async static Task ConvertFiles(IEnumerable<string> files, string rootPath, HashSet<string> extensions)
+    private async static Task ConvertFiles(IEnumerable<string> files, string rootPath, MyDatabase db)
     {
         foreach (var inputFile in files)
         {
@@ -167,6 +173,8 @@ class Program
                     ShowProgress(rootPath);
                     Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
 
+                    db.FinishedConvertingFile(inputFile);
+
                     await Task.Delay(30000);
                 }
             }
@@ -178,7 +186,7 @@ class Program
         }
     }
 
-    private static void DeleteFiles(List<string> files, string rootPath)
+    private static void DeleteFiles(List<string> files)
     {
         { 
             foreach (var item in files)
@@ -194,20 +202,22 @@ class Program
                 }
             }
 
-            File.AppendAllText(Path.Combine(rootPath, "Finished.txt"), "1");
+            //File.AppendAllText(Path.Combine(rootPath, "Finished.txt"), "1");
         }
     }
 
-    private static void LogFinished(DirectoryInfo directory, string rootPath)
+    private static void LogFinished(DirectoryInfo directory, MyDatabase db)
     {
         var AfterfolderSize = directory.EnumerateFiles("*", SearchOption.AllDirectories).Where(x => x.Name.StartsWith("Converted_")).Sum(fi => fi.Length);
         var AfterfolderSizeInMB = AfterfolderSize / 1048576;
         var AfterfolderSizeInGB = AfterfolderSizeInMB / 1024;
 
-        File.AppendAllText(Path.Combine(rootPath, "info.txt"), string.Format("\nAfter Folder Size = {1} GB, {0} MB", AfterfolderSizeInMB, AfterfolderSizeInGB));
-        Console.WriteLine("Conversion completed!");
+        if (db.IsAfterFolderSizeSet())
+        {
+            db.SetAfterFolderSize(AfterfolderSizeInGB == 0 ? AfterfolderSizeInMB : AfterfolderSizeInGB, AfterfolderSizeInGB == 0 ? "MB" : "GB");
+        }
 
-        File.AppendAllText(@"C:\LOGS\finished.txt", rootPath + $" Finished On {DateTime.Now.ToString("dd/MM/yyyy hh:mm:ss")}" + "--------------------------------------------------------------------\n");
+        Console.WriteLine("Conversion completed!");
     }
 
     private static List<string> GetCorruptedVideos(List<string> videos)
@@ -248,7 +258,7 @@ class Program
         Console.WriteLine(string.Format("{0}% Progress", Math.Floor(percentage * 100)));
     }
 
-    private static bool CheckHandbrakePath(string path)
+    private static bool CheckFilePath(string path)
     {
         if (File.Exists(path))
         {
@@ -256,10 +266,7 @@ class Program
         }
         return false;
     }
-    private static bool CheckEncodeStatusOnFolder(string rootPath)
-    {
-        return File.Exists(Path.Combine(rootPath, "Finished.txt"));
-    }
+
     private static List<string> GetTotalVideos(string rootPath)
     {
         return  Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
