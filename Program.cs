@@ -8,7 +8,10 @@ using System.Timers;
 class Program
 {
     static string  handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
-    internal static readonly HashSet<string> extensions = [".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v"];
+    internal static readonly HashSet<string> extensions = new HashSet<string>() { ".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v"};
+    internal static readonly HashSet<string> unconvertables = new HashSet<string>() { };
+
+    //internal static readonly HashSet<string> extensions = [".m4v"];
 
     static async Task Main(string[] args)
     {
@@ -20,11 +23,12 @@ class Program
         }
 
 
-        //var rootPath = "M:\\NOPE\\OLD\\BYDAY\\1";
-        var rootPath = "M:\\NOPE\\New folder";
-
+        var rootPath = "";
         var videos = GetTotalVideos(rootPath);
         var convertedVideos = GetConvertedVideos(rootPath);
+        var unconvertableVideos = videos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
+        var ConvertedButUnconvertableVideos = convertedVideos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
+
 
         var db = new MyDatabase(rootPath);
 
@@ -34,8 +38,21 @@ class Program
             Console.WriteLine("Finished all encoding in this folder!");
             return;
         }
+        Console.WriteLine("------------------------------------------------------------------------------------------------------");
+        Console.WriteLine(string.Format("Total Videos Found: {0}", videos.Count));
+        if(unconvertableVideos.Count > 0)
+        {
+            Console.WriteLine(string.Format("Total Unconvertable Videos Found: {0}", unconvertableVideos.Count));
+            videos = unconvertableVideos;
+        }
+        if(ConvertedButUnconvertableVideos.Count > 0)
+        {
+            Console.WriteLine(string.Format("Total Converted But Unconvertable Videos Found: {0}", ConvertedButUnconvertableVideos.Count));
+            convertedVideos = ConvertedButUnconvertableVideos;
+        }
+        Console.WriteLine("------------------------------------------------------------------------------------------------------");
 
-        Console.WriteLine(string.Format("Total Videos Found: {0}\n\n", videos.Count));
+
         ShowProgress(rootPath);
 
         if (convertedVideos.Count != 0)
@@ -44,7 +61,7 @@ class Program
 
             Console.WriteLine("------------------------------------------------------------------------------------------------------");
 
-            Console.WriteLine("\nChecking if there are Corrupt Files");
+            Console.WriteLine("\nChecking if there are Converted but Corrupted Files..");
 
             var corruptVideos = GetCorruptedVideos(convertedVideos);
             if (corruptVideos.Count != 0)
@@ -152,6 +169,8 @@ class Program
         {
             try
             {
+                var startTime = DateTime.Now;
+
                 var folderPath = Path.GetDirectoryName(inputFile);
                 var fileName = Path.GetFileName(inputFile);
                 var outputFile = Path.Combine(folderPath, $"Converted_{fileName}");
@@ -175,7 +194,27 @@ class Program
 
                     db.FinishedConvertingFile(inputFile);
 
-                    await Task.Delay(30000);
+                    var elapsed = DateTime.Now - startTime;
+
+                    #region cool off the CPU after completing the conversion..
+                        //if the time elapsed greater than 4 minutes or 240 Seconds, wait longer to cool off..
+                        if (elapsed.TotalSeconds >= 300)
+                        {
+                            var waitingTime = (elapsed.TotalSeconds / 3.5) * 1000;
+                            var flooredWaitingTime = (int)Math.Floor(waitingTime);
+                            await Task.Delay(flooredWaitingTime);
+                        }
+                        //if time elapsed is between 1 minute or 60 seconds AND 4 minutes or 240 seconds, wait one minute to cool off
+                        else if (elapsed.TotalSeconds >= 60)
+                        {
+                            var waitingTime = 60000;
+                            await Task.Delay(waitingTime);
+                        }
+                        else
+                        {
+                            await Task.Delay(30000);
+                        }
+                    #endregion
                 }
             }
             catch (Exception)
@@ -198,6 +237,10 @@ class Program
                     var path = Path.GetDirectoryName(item);
                     var file = Path.GetFileName(item);
                     var newFile = "Converted_" + file;
+                    if (file.Contains("2160p"))
+                    {
+                        file = file.Replace("2160p", "1080p");
+                    }
                     File.Move(Path.Combine(path, newFile), Path.Combine(path, file));
                 }
             }
@@ -269,10 +312,11 @@ class Program
 
     private static List<string> GetTotalVideos(string rootPath)
     {
-        return  Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
+        var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
                              .Where(x => extensions.Contains(Path.GetExtension(x)))
                              .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
                              .ToList();
+        return files;
     }
     private static List<string> GetConvertedVideos(string rootPath)
     {
