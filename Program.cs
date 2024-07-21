@@ -2,23 +2,26 @@
 using Handbrake.Data;
 using Handbrake.Properties;
 using MediaInfo;
+using Microsoft.Toolkit.Uwp.Notifications;
 using System.Diagnostics;
+using System.Linq;
 using System.Timers;
 
 class Program
 {
-    static string  handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
-    internal static readonly HashSet<string> extensions = new HashSet<string>() { ".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v"};
+    static string handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
+
+    internal static readonly HashSet<string> extensions = new HashSet<string>() { ".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v" };
     internal static readonly HashSet<string> unconvertables = new HashSet<string>() { };
 
-    //internal static readonly HashSet<string> extensions = [".m4v"];
+    static bool shutdown = false;
 
     static async Task Main(string[] args)
     {
 
-        if(!CheckFilePath(handbrakePath))
+        if (!CheckFilePath(handbrakePath))
         {
-            Console.WriteLine("HandbrakeCLI does not exist.. please download the latest version from https://handbrake.fr/downloads2.php");
+            Console.WriteLine($"HandbrakeCLI does not exist.. please download the latest version from https://handbrake.fr/downloads2.php \nand put it in path \"{handbrakePath}\"");
             return;
         }
 
@@ -29,25 +32,24 @@ class Program
         var unconvertableVideos = videos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
         var ConvertedButUnconvertableVideos = convertedVideos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
 
-
         var db = new MyDatabase(rootPath);
 
         //Check if all conversion is finished in this folder!
-        if (db.HasFinalizedConversion()) 
+        if (db.HasFinalizedConversion())
         {
             Console.WriteLine("Finished all encoding in this folder!");
             return;
         }
         Console.WriteLine("------------------------------------------------------------------------------------------------------");
         Console.WriteLine(string.Format("Total Videos Found: {0}", videos.Count));
-        if(unconvertableVideos.Count > 0)
+        if (unconvertableVideos.Count > 0)
         {
-            Console.WriteLine(string.Format("Total Unconvertable Videos Found: {0}", unconvertableVideos.Count));
-            videos = unconvertableVideos;
+            Console.WriteLine(string.Format("Total Unconvertable Videos Found: {0}, Total size: {1}", unconvertableVideos.Count, GetFileSizes(unconvertableVideos)));
+            videos = videos.Except(unconvertableVideos).ToList();
         }
-        if(ConvertedButUnconvertableVideos.Count > 0)
+        if (ConvertedButUnconvertableVideos.Count > 0)
         {
-            Console.WriteLine(string.Format("Total Converted But Unconvertable Videos Found: {0}", ConvertedButUnconvertableVideos.Count));
+            Console.WriteLine(string.Format("Total Converted But Unconvertable Videos Found: {0}, Total size: {1}", ConvertedButUnconvertableVideos.Count, GetFileSizes(ConvertedButUnconvertableVideos)));
             convertedVideos = ConvertedButUnconvertableVideos;
         }
         Console.WriteLine("------------------------------------------------------------------------------------------------------");
@@ -66,10 +68,10 @@ class Program
             var corruptVideos = GetCorruptedVideos(convertedVideos);
             if (corruptVideos.Count != 0)
             {
-                Console.WriteLine("\nFound Corrupt Files: ");
+                Console.WriteLine("\nFound Corrupt File(s): ");
                 foreach (var vid in corruptVideos)
                 {
-                    Console.WriteLine(Path.GetFileName(vid));
+                    Console.WriteLine($"- {Path.GetFileName(vid)}");
                 }
                 Console.WriteLine("\nDelete corrupt files? (Y)es or (N)o");
                 if (Console.ReadLine().ToLower() == "y")
@@ -91,12 +93,21 @@ class Program
 
                     videos = GetTotalVideos(rootPath);
                     convertedVideos = GetConvertedVideos(rootPath);
+
+                    if (unconvertableVideos.Count > 0)
+                    {
+                        videos = videos.Except(unconvertableVideos).ToList();
+                    }
+                    if (ConvertedButUnconvertableVideos.Count > 0)
+                    {
+                        convertedVideos = ConvertedButUnconvertableVideos;
+                    }
                 }
                 Console.Write("\b");
             }
             else
             {
-                Console.Write(new String(' ', Console.BufferWidth));
+                Console.Write(new string(' ', Console.BufferWidth));
                 Console.WriteLine("\nNo Corrupt files Found.");
             }
             Console.WriteLine("------------------------------------------------------------------------------------------------------");
@@ -121,6 +132,8 @@ class Program
             Console.WriteLine("Old files are deleted! :)");
 
             db.FinalizeFolderConversion();
+
+            FolderHelper.SetFolderIcon(rootPath);
         }
         else
         {
@@ -138,17 +151,48 @@ class Program
 
             var pressed = Console.ReadLine();
 
-            if(pressed == "F")
+            if (pressed == "F")
             {
-                directory = new DirectoryInfo(rootPath);
+                Console.WriteLine("------------------------------------------------------------------------------------------------------");
+                Console.WriteLine("are you sure?? this will delete the source files..\n you should only do this if the source files are corrupt and not convertable!\nproceed? (Y)es, (N)o");
+                Console.WriteLine("------------------------------------------------------------------------------------------------------");
+                var confirmation = Console.ReadLine();
+                if (confirmation.ToLower() == "y")
+                {
+                    Console.WriteLine("Okay, you asked for it fellar");
 
-                DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
-                LogFinished(directory, db);
-                Console.Clear();
+                    //rename the source files to converted_something..
+                    foreach (var item in filteredFiles)
+                    {
+                        var path = Path.GetDirectoryName(item);
+                        var file = Path.GetFileName(item);
+                        var newFile = "Converted_" + file;
 
-                Console.WriteLine("Finalized! :)");
+                        File.Move(Path.Combine(path, file), Path.Combine(path, newFile), true);
+                    }
 
-                return;
+                    DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
+
+
+                    //log finished
+                    directory = new DirectoryInfo(rootPath);
+
+                    db.FinalizeFolderConversion();
+
+                    LogFinished(directory, db);
+                    Console.Clear();
+
+                    FolderHelper.SetFolderIcon(rootPath);
+
+                    Console.WriteLine("Finalized! :)");
+
+                    return;
+                }
+                else
+                {
+                    Console.WriteLine("Phew, close! good thing i inserted this confirmation then.. ");
+                    return;
+                }
             }
             else if (pressed != "Y")
             {
@@ -160,6 +204,11 @@ class Program
             db.FolderCompletedConversion();
 
             LogFinished(directory, db);
+
+            if (shutdown)
+            {
+                Process.Start("shutdown", "/f");
+            }
         }
     }
 
@@ -197,23 +246,23 @@ class Program
                     var elapsed = DateTime.Now - startTime;
 
                     #region cool off the CPU after completing the conversion..
-                        //if the time elapsed greater than 4 minutes or 240 Seconds, wait longer to cool off..
-                        if (elapsed.TotalSeconds >= 300)
-                        {
-                            var waitingTime = (elapsed.TotalSeconds / 3.5) * 1000;
-                            var flooredWaitingTime = (int)Math.Floor(waitingTime);
-                            await Task.Delay(flooredWaitingTime);
-                        }
-                        //if time elapsed is between 1 minute or 60 seconds AND 4 minutes or 240 seconds, wait one minute to cool off
-                        else if (elapsed.TotalSeconds >= 60)
-                        {
-                            var waitingTime = 60000;
-                            await Task.Delay(waitingTime);
-                        }
-                        else
-                        {
-                            await Task.Delay(30000);
-                        }
+                    //if the time elapsed greater than 4 minutes or 240 Seconds, wait longer to cool off..
+                    if (elapsed.TotalSeconds >= 300)
+                    {
+                        var waitingTime = (elapsed.TotalSeconds / 3.5) * 1000;
+                        var flooredWaitingTime = (int)Math.Floor(waitingTime);
+                        await Task.Delay(flooredWaitingTime);
+                    }
+                    //if time elapsed is between 1 minute or 60 seconds AND 4 minutes or 240 seconds, wait one minute to cool off
+                    else if (elapsed.TotalSeconds >= 60)
+                    {
+                        var waitingTime = 60000;
+                        await Task.Delay(waitingTime);
+                    }
+                    else
+                    {
+                        await Task.Delay(30000);
+                    }
                     #endregion
                 }
             }
@@ -227,20 +276,28 @@ class Program
 
     private static void DeleteFiles(List<string> files)
     {
-        { 
+        {
             foreach (var item in files)
             {
+                var path = Path.GetDirectoryName(item);
+                var file = Path.GetFileName(item);
+                var newFile = "Converted_" + file;
+
                 if (File.Exists(item))
                 {
                     File.SetAttributes(item, FileAttributes.Normal);
                     File.Delete(item);
-                    var path = Path.GetDirectoryName(item);
-                    var file = Path.GetFileName(item);
-                    var newFile = "Converted_" + file;
+
                     if (file.Contains("2160p"))
                     {
                         file = file.Replace("2160p", "1080p");
                     }
+                    File.Move(Path.Combine(path, newFile), Path.Combine(path, file));
+                }
+
+
+                else if (File.Exists(Path.Combine(path, newFile)))
+                {
                     File.Move(Path.Combine(path, newFile), Path.Combine(path, file));
                 }
             }
@@ -257,7 +314,10 @@ class Program
 
         if (db.IsAfterFolderSizeSet())
         {
-            db.SetAfterFolderSize(AfterfolderSizeInGB == 0 ? AfterfolderSizeInMB : AfterfolderSizeInGB, AfterfolderSizeInGB == 0 ? "MB" : "GB");
+            db.SetAfterFolderSize(AfterfolderSizeInGB == 0 ? 
+                AfterfolderSizeInMB : 
+                AfterfolderSizeInGB, 
+                AfterfolderSizeInGB == 0 ? "MB" : "GB");
         }
 
         Console.WriteLine("Conversion completed!");
@@ -294,6 +354,17 @@ class Program
 
         var totalVideos = GetTotalVideos(rootPath);
         var convertedVideos = GetConvertedVideos(rootPath);
+        var unconvertableVideos = totalVideos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
+        var ConvertedButUnconvertableVideos = convertedVideos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
+
+        if (unconvertableVideos.Count > 0)
+        {
+            totalVideos = totalVideos.Except(unconvertableVideos).ToList();
+        }
+        if (ConvertedButUnconvertableVideos.Count > 0)
+        {
+            convertedVideos = ConvertedButUnconvertableVideos;
+        }
 
         double percentage = (double)convertedVideos.Count / totalVideos.Count;
 
@@ -303,17 +374,19 @@ class Program
 
     private static bool CheckFilePath(string path)
     {
-        if (File.Exists(path))
-        {
-            return true;
-        }
-        return false;
+        return File.Exists(path);
     }
 
     private static List<string> GetTotalVideos(string rootPath)
     {
+        if (!Directory.Exists(rootPath))
+        {
+            var error = "The directory does not exist.. or maybe its not a directory. ¯\\_(ツ)_/¯";
+            Console.WriteLine(error);
+            throw new Exception(error);
+        }
         var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories)
-                             .Where(x => extensions.Contains(Path.GetExtension(x)))
+                             .Where(x => extensions.Contains(Path.GetExtension(x).ToLower()))
                              .Where(x => !Path.GetFileName(x).StartsWith("Converted_"))
                              .ToList();
         return files;
@@ -324,5 +397,18 @@ class Program
                                         .Where(x => extensions.Contains(Path.GetExtension(x)))
                                         .Where(x => Path.GetFileName(x).StartsWith("Converted_"))
                                         .ToList();
+    }
+    private static string GetFileSizes(List<string> files)
+    {
+        double totalSize = 0;
+        foreach (var file in files)
+        {
+            var size = new FileInfo(file).Length;
+            totalSize += size;
+        }
+        var sizeInMB = totalSize / 1048576;
+        var sizeInGB = sizeInMB / 1024;
+
+        return sizeInGB == 0 ? sizeInMB.ToString("#.##") + " MB" : sizeInGB.ToString("#.##") + " GB";
     }
 }
