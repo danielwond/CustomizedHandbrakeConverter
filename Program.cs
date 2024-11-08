@@ -5,14 +5,16 @@ using MediaInfo;
 using Microsoft.Toolkit.Uwp.Notifications;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Timers;
 
 class Program
 {
     static string handbrakePath = "C:\\handbrake\\HandBrakeCLI.exe";
 
-    internal static readonly HashSet<string> extensions = new HashSet<string>() { ".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v" };
-    internal static readonly HashSet<string> unconvertables = new HashSet<string>() { };
+    internal static readonly HashSet<string> extensions = new HashSet<string>() { ".mp4", ".wmv", ".avi", ".mkv", ".mov", ".m4v", ".mpg" };
+    internal static readonly HashSet<string> unconvertables = new HashSet<string>() { "Vixen", "Blacked", "Tushy", "HEVC" };
 
     static bool shutdown = false;
 
@@ -26,7 +28,7 @@ class Program
         }
 
 
-        var rootPath = "";
+        var rootPath = @"E:\New folder (5)\Individuals\Aaliyah Hadid [face latin]";
         var videos = GetTotalVideos(rootPath);
         var convertedVideos = GetConvertedVideos(rootPath);
         var unconvertableVideos = videos.Where(file => unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
@@ -37,8 +39,7 @@ class Program
         //Check if all conversion is finished in this folder!
         if (db.HasFinalizedConversion())
         {
-            Console.WriteLine("Finished all encoding in this folder!");
-            return;
+            CheckNewlyAddedVideos(rootPath, false);
         }
         Console.WriteLine("------------------------------------------------------------------------------------------------------");
         Console.WriteLine(string.Format("Total Videos Found: {0}", videos.Count));
@@ -125,7 +126,7 @@ class Program
                 return;
             }
 
-            DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
+            DeleteFiles(rootPath);
 
             Console.Clear();
 
@@ -147,7 +148,7 @@ class Program
                 db.SetBeforeFolderSize(BeforefolderSizeInGB == 0 ? BeforefolderSizeInMB : BeforefolderSizeInGB, BeforefolderSizeInGB == 0 ? "MB" : "GB");
             }
 
-            Console.WriteLine("Found {0} file(s) to convert, proceed? (Y)es, (N)o, (F)inalize", filteredFiles.Count);
+            Console.WriteLine("Found {0} file(s) to convert, proceed? (Y)es, (N)o, (F)inalize, (L)ist Files", filteredFiles.Count);
 
             var pressed = Console.ReadLine();
 
@@ -171,7 +172,7 @@ class Program
                         File.Move(Path.Combine(path, file), Path.Combine(path, newFile), true);
                     }
 
-                    DeleteFiles(convertedVideos.Select(x => x.Replace("Converted_", "")).ToList());
+                    DeleteFiles(rootPath);
 
 
                     //log finished
@@ -194,10 +195,19 @@ class Program
                     return;
                 }
             }
+            else if (pressed == "L")
+            {
+                foreach (var item in filteredFiles)
+                {
+                    Console.WriteLine(Path.GetFileName(item));
+                }
+                return;
+            }
             else if (pressed != "Y")
             {
                 return;
             }
+
 
             await ConvertFiles(filteredFiles, rootPath, db);
 
@@ -224,6 +234,7 @@ class Program
                 var fileName = Path.GetFileName(inputFile);
                 var outputFile = Path.Combine(folderPath, $"Converted_{fileName}");
                 var fileInfo = new FileInfo(inputFile);
+                var beforeSize = fileInfo.Length;
 
                 //if (fileInfo.Length >= 943718400 && !fileName.StartsWith("Converted_"))
                 if (!fileName.StartsWith("Converted_"))
@@ -241,29 +252,35 @@ class Program
                     ShowProgress(rootPath);
                     Console.WriteLine("\n\n---------------------------------------------------------------------------------------------------------------\n\n");
 
-                    db.FinishedConvertingFile(inputFile);
+                    if (File.Exists(outputFile))
+                    {
+                        var newFileInfo = new FileInfo(outputFile);
+                        var afterSize = newFileInfo.Length;
 
-                    var elapsed = DateTime.Now - startTime;
+                        db.FinishedConvertingFile(inputFile, (beforeSize / 1048576).ToString(), (afterSize / 1048576).ToString());
 
-                    #region cool off the CPU after completing the conversion..
-                    //if the time elapsed greater than 4 minutes or 240 Seconds, wait longer to cool off..
-                    if (elapsed.TotalSeconds >= 300)
-                    {
-                        var waitingTime = (elapsed.TotalSeconds / 3.5) * 1000;
-                        var flooredWaitingTime = (int)Math.Floor(waitingTime);
-                        await Task.Delay(flooredWaitingTime);
+                        var elapsed = DateTime.Now - startTime;
+
+                        #region cool off the CPU after completing the conversion..
+                        //if the time elapsed greater than 4 minutes or 240 Seconds, wait longer to cool off..
+                        if (elapsed.TotalSeconds >= 300)
+                        {
+                            var waitingTime = (elapsed.TotalSeconds / 3.5) * 1000;
+                            var flooredWaitingTime = (int)Math.Floor(waitingTime);
+                            await Task.Delay(flooredWaitingTime);
+                        }
+                        //if time elapsed is between 1 minute or 60 seconds AND 4 minutes or 240 seconds, wait one minute to cool off
+                        else if (elapsed.TotalSeconds >= 60)
+                        {
+                            var waitingTime = 60000;
+                            await Task.Delay(waitingTime);
+                        }
+                        else
+                        {
+                            await Task.Delay(30000);
+                        }
+                        #endregion
                     }
-                    //if time elapsed is between 1 minute or 60 seconds AND 4 minutes or 240 seconds, wait one minute to cool off
-                    else if (elapsed.TotalSeconds >= 60)
-                    {
-                        var waitingTime = 60000;
-                        await Task.Delay(waitingTime);
-                    }
-                    else
-                    {
-                        await Task.Delay(30000);
-                    }
-                    #endregion
                 }
             }
             catch (Exception)
@@ -274,49 +291,78 @@ class Program
         }
     }
 
-    private static void DeleteFiles(List<string> files)
+    private static void DeleteFiles(string rootPath)
     {
+        var files = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories);
+        for (int i = 0; i < files.Length; i++)
         {
-            foreach (var item in files)
+            for (int j = 0; j < files.Length; j++)
             {
-                var path = Path.GetDirectoryName(item);
-                var file = Path.GetFileName(item);
-                var newFile = "Converted_" + file;
+                var converted = files[i];
+                var raw = files[j];
 
-                if (File.Exists(item))
+                if (Path.GetFileName(converted).StartsWith("Converted_"))
                 {
-                    File.SetAttributes(item, FileAttributes.Normal);
-                    File.Delete(item);
+                    var convertedFileName = Path.GetFileName(converted)[10..];
+                    var rawFileName = Path.GetFileName(raw);
 
-                    if (file.Contains("2160p"))
+                    if (convertedFileName == rawFileName)
                     {
-                        file = file.Replace("2160p", "1080p");
+                        var convertedFileInfo = new FileInfo(converted);
+                        var rawFileInfo = new FileInfo(raw);
+
+                        if (convertedFileInfo.Length >= rawFileInfo.Length)
+                        {
+                            //Converted is greater, so delete the Converted file..
+                            if (File.Exists(converted) && convertedFileInfo.Length <= 1000000)
+                            {
+                                File.Delete(converted);
+                            }
+                            break;
+                        }
+                        else if (rawFileInfo.Length >= convertedFileInfo.Length)
+                        {
+                            //Raw file is greater so delete the Raw File
+                            if (File.Exists(raw))
+                            {
+                                File.SetAttributes(raw, FileAttributes.Normal);
+
+                                File.Delete(raw);
+                                File.Move(converted, raw, true);
+                            }
+                            break;
+                        }
                     }
-                    File.Move(Path.Combine(path, newFile), Path.Combine(path, file));
-                }
-
-
-                else if (File.Exists(Path.Combine(path, newFile)))
-                {
-                    File.Move(Path.Combine(path, newFile), Path.Combine(path, file));
                 }
             }
-
-            //File.AppendAllText(Path.Combine(rootPath, "Finished.txt"), "1");
         }
     }
 
     private static void LogFinished(DirectoryInfo directory, MyDatabase db)
     {
-        var AfterfolderSize = directory.EnumerateFiles("*", SearchOption.AllDirectories).Where(x => x.Name.StartsWith("Converted_")).Sum(fi => fi.Length);
+        var AfterfolderSize = directory.EnumerateFiles("*", SearchOption.AllDirectories).Where(x =>
+        {
+            var words = Regex.Split(x.Name, @"\W+");
+
+            bool containsWord = words.Any(word => unconvertables.Any(value => word.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0));
+
+            if (x.Name.StartsWith("Converted_") || containsWord)
+            {
+                return true;
+            }
+            return false;
+        }).Sum(fi => fi.Length);
+
+        //var AfterfolderSize = directory.EnumerateFiles("*", SearchOption.AllDirectories).Sum(fi => fi.Length);
+
         var AfterfolderSizeInMB = AfterfolderSize / 1048576;
-        var AfterfolderSizeInGB = AfterfolderSizeInMB / 1024;
+        long AfterfolderSizeInGB = AfterfolderSizeInMB / 1024;
 
         if (db.IsAfterFolderSizeSet())
         {
-            db.SetAfterFolderSize(AfterfolderSizeInGB == 0 ? 
-                AfterfolderSizeInMB : 
-                AfterfolderSizeInGB, 
+            db.SetAfterFolderSize(AfterfolderSizeInGB == 0 ?
+                AfterfolderSizeInMB :
+                AfterfolderSizeInGB,
                 AfterfolderSizeInGB == 0 ? "MB" : "GB");
         }
 
@@ -410,5 +456,82 @@ class Program
         var sizeInGB = sizeInMB / 1024;
 
         return sizeInGB == 0 ? sizeInMB.ToString("#.##") + " MB" : sizeInGB.ToString("#.##") + " GB";
+    }
+    private static void CheckNewlyAddedVideos(string rootPath, bool calledAgain)
+    {
+        //videos with unconvertables
+        var totalVideos = GetTotalVideos(rootPath);
+        var db = new MyDatabase(rootPath);
+
+        var newlyAddedVideos = new List<string>();
+
+        //videos without unconvertables
+        var allFolderVideos = GetConvertables(totalVideos);
+
+        var convertedVideosDB = db.GetConvertedVideos()
+            .Select((x) =>
+            {
+                if (File.Exists(x))
+                {
+                    return x;
+                }
+
+                else if (!File.Exists(x))
+                {
+                    var newPath = x.Replace("2160p", "1080p");
+                    var file = FolderHelper.GetWorkingFolderWithExistsingDrive(newPath);
+                    return file;
+                }
+
+                return FolderHelper.GetWorkingFolderWithExistsingDrive(x);
+
+            })
+            .ToList();
+
+        var dbVideos = convertedVideosDB.Select(x => Path.GetFileName(x));
+
+        foreach (var video in allFolderVideos)
+        {
+            var videoOnly = Path.GetFileName(video);
+            if (!dbVideos.Contains(videoOnly))
+            {
+                newlyAddedVideos.Add(video);
+                //db.FinishedConvertingFile(video, "M", "M");
+            }
+        }
+
+
+
+        if (newlyAddedVideos.Count != 0)
+        {
+            /*            Console.WriteLine(string.Format("\n\nFound {0} new added videos, what do you want to do with them\n(L)ist them, (C)onvert them, Any Other Key.. dismiss", newlyAddedVideos.Count));
+                        var pressed = Console.ReadLine();
+                        if (pressed == "L")
+                        {
+                            Console.Clear();
+
+                            foreach (var item in newlyAddedVideos)
+                            {
+                                Console.WriteLine(item);
+                            }
+                            //relaunch the method
+                            CheckNewlyAddedVideos(rootPath, true);
+                        }*/
+        }
+        else
+        {
+            Console.WriteLine("Finished all encoding in this folder!");
+            Environment.Exit(0);
+        }
+    }
+
+    private static List<string> GetConvertables(List<string> videos)
+    {
+        if (videos.Count != 0)
+        {
+            var data = videos.Where(file => !unconvertables.Any(x => file.ToLower().Contains(x.ToLower()))).ToList();
+            return data;
+        }
+        return [];
     }
 }

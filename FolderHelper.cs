@@ -15,7 +15,7 @@ namespace Handbrake
             string folderType = "Generic";
             try
             {
-                string iconPath = "C:\\Users\\ddpro\\Downloads\\pngegg_fTM_icon.ico";
+                string iconPath = "C:\\Users\\Danny\\Downloads\\icon.png";
 
                 //deleting existing files
                 RettingIcons(dir);
@@ -160,5 +160,26 @@ namespace Handbrake
         // Copied from stackoverflow.com
         [DllImport("shell32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern void SHChangeNotify(int wEventId, int uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        public static string GetWorkingFolderWithExistsingDrive(string file)
+        {
+            var GetUSBDrives = DriveInfo.GetDrives().Where(driveInfo => driveInfo.IsReady).Select(x => x.RootDirectory.FullName).Except(["C:\\"]).ToList();
+
+            foreach (var drive in GetUSBDrives)
+            {
+                var paths = file.Split('\\').ToList();
+                paths.RemoveAt(0);
+                paths.Insert(0, drive);
+
+                var newPath = Path.Combine([.. paths]);
+
+                if (File.Exists(newPath))
+                {
+                    return newPath;
+                }
+            }
+            return file;
+        }
+
     }
 }

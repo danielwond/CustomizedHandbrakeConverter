@@ -13,5 +13,7 @@ namespace Handbrake.Models
         public int ID { get; set; }
         public string? File { get; set; }
         public string? FullPath { get; set; }
+        public string? BeforeSize { get; set; }
+        public string? AfterSize { get; set; }
     }
 }

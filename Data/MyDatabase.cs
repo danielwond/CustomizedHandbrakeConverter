@@ -1,5 +1,6 @@
 ﻿using Handbrake.Models;
 using SQLite;
+using System.Data;
 
 namespace Handbrake.Data
 {
@@ -23,7 +24,7 @@ namespace Handbrake.Data
             var logDb = new SQLiteConnection(_logDb);
 
 
-            if(!TableExists(result, "Configurations"))
+            if (!TableExists(result, "Configurations"))
             {
                 result.CreateTable<Configurations>();
 
@@ -74,15 +75,53 @@ namespace Handbrake.Data
 
             return result;
         }
-        public void FinishedConvertingFile(string path)
+        public void FinishedConvertingFile(string path, string beforeSize, string afterSize)
         {
+            //create table data
             var file = new ConvertedFiles()
             {
                 FullPath = path,
-                File = Path.GetFileName(path)
+                File = Path.GetFileName(path),
+                AfterSize = afterSize,
+                BeforeSize = beforeSize
             };
+
+            //create db connection
             var db = new SQLiteConnection(_db);
+
+
+            //get all the column types
+            var columns = typeof(ConvertedFiles).GetProperties();
+
+            //create loop that ensures the column exists in the table
+            foreach (var column in columns)
+            {
+                //calls the EnsureColumnExists function to check if the column exists, if it doesnt it will create it.
+                EnsureColumnExists(db, nameof(ConvertedFiles), column.Name, GetSQLiteType(column.PropertyType));
+            }
+
+            // Insert the file record into the database
             db.Insert(file);
+        }
+
+        private void EnsureColumnExists(SQLiteConnection db, string tableName, string columnName, string columnType)
+        {
+            var columns = db.GetTableInfo(tableName);
+            if (!columns.Any(c => c.Name == columnName))
+            {
+                var query = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnType}";
+                db.Execute(query);
+            }
+        }
+        private string GetSQLiteType(Type type)
+        {
+
+            if (type == typeof(string))
+                return "TEXT";
+            else if (type == typeof(int))
+                return "INTEGER";
+            else
+                throw new NotImplementedException($"Unsupported type: {type}");
         }
 
         public void FinalizeFolderConversion()
@@ -143,7 +182,7 @@ namespace Handbrake.Data
                 var db = new SQLiteConnection(_db);
                 var configTable = db.Table<Configurations>();
                 var before = db.Query<Configurations>("select * from Configurations where ID = 3").FirstOrDefault();
-                
+
                 before!.Value = beforeSize;
                 before!.Option = sizeInfo;
 
@@ -204,6 +243,14 @@ namespace Handbrake.Data
             string sql = $"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{tableName}'";
             var count = _conn.ExecuteScalar<int>(sql);
             return count > 0;
+        }
+
+        public List<string?> GetConvertedVideos()
+        {
+            var db = new SQLiteConnection(_db);
+            var convertedTable = db.Table<ConvertedFiles>();
+            var data = convertedTable.Select(x => x.FullPath).ToList();
+            return data;
         }
 
     }
